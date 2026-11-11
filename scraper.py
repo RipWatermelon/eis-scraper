@@ -16,7 +16,7 @@ BASE = "https://www.eis.gov.lv"
 PAGE_URL = BASE + "/EKEIS/Supplier"
 API_URL = BASE + "/EKEIS/supplier/searchprocurements"
 
-MAX_PAGES = 3      # test mode: only 3 pages (= 60 listings)
+MAX_PAGES = 10      # test mode: only 3 pages (= 60 listings)
 PAGE_SIZE = 20
 
 
