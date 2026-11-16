@@ -2,12 +2,22 @@ name: Scrape EIS
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "12,44 * * * *"
   workflow_dispatch:
+    inputs:
+      max_pages:
+        description: "How many pages to scan (10 = quick, 600 = full run)"
+        required: false
+        default: "10"
+
+concurrency:
+  group: scrape-eis
+  cancel-in-progress: false
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -18,3 +28,4 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          MAX_PAGES: ${{ github.event.inputs.max_pages || '10' }}
