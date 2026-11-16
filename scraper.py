@@ -2,6 +2,9 @@ import os
 import re
 import sys
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import requests
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -16,8 +19,11 @@ BASE = "https://www.eis.gov.lv"
 PAGE_URL = BASE + "/EKEIS/Supplier"
 API_URL = BASE + "/EKEIS/supplier/searchprocurements"
 
-MAX_PAGES = 10      # test mode: only 3 pages (= 60 listings)
+# How many pages to scan. Quick runs use 10, full runs use 600 (set via MAX_PAGES env var).
+MAX_PAGES = int(os.environ.get("MAX_PAGES", "10"))
 PAGE_SIZE = 20
+
+NOW = datetime.now(ZoneInfo("Europe/Riga")).replace(tzinfo=None)
 
 
 def start_session():
@@ -62,10 +68,31 @@ def fetch_page(session, token, offset):
     }
     if token:
         headers["__RequestVerificationToken"] = token
-    r = session.post(API_URL, json=payload, headers=headers, timeout=60)
-    r.raise_for_status()
-    event = r.json().get("EventData") or {}
-    return event.get("Items", []), event.get("Hits")
+
+    last_error = None
+    for attempt in range(1, 4):
+        try:
+            r = session.post(API_URL, json=payload, headers=headers, timeout=60)
+            r.raise_for_status()
+            event = r.json().get("EventData") or {}
+            return event.get("Items", []), event.get("Hits")
+        except Exception as e:
+            last_error = e
+            print(f"  Offset {offset}, attempt {attempt} failed: {e}")
+            time.sleep(5 * attempt)
+    raise last_error
+
+
+def is_expired(item):
+    """True only if we can clearly tell the submission deadline is in the past."""
+    raw = item.get("LastStagePlannedProposalSubmissionTime")
+    if not raw:
+        return False  # no deadline listed -> keep it
+    try:
+        deadline = datetime.fromisoformat(str(raw)[:19])
+    except ValueError:
+        return False  # can't read it -> keep it
+    return deadline < NOW
 
 
 def to_row(item):
@@ -104,21 +131,24 @@ def save_rows(rows):
 def main():
     session, token = start_session()
     print("Security token found:", bool(token))
+    print("Max pages this run:", MAX_PAGES)
     total_saved = 0
+    total_skipped = 0
     for page in range(MAX_PAGES):
         offset = page * PAGE_SIZE
         items, hits = fetch_page(session, token, offset)
         if not items:
             print("No more listings, stopping.")
             break
-        rows = {row["id"]: row for row in map(to_row, items)}.values()
-        save_rows(list(rows))
-        total_saved += len(rows)
-        print(f"Page {page + 1}: offset {offset}, {len(items)} listings, "
-              f"dates {items[0]['ProcurementAnnouncementDate']} -> {items[-1]['ProcurementAnnouncementDate']} "
-              f"(Hits: {hits})")
-        time.sleep(1)  # be polite to their server
-    print("Done. Saved/updated", total_saved, "listings.")
+        live_items = [i for i in items if not is_expired(i)]
+        total_skipped += len(items) - len(live_items)
+        if live_items:
+            rows = {row["id"]: row for row in map(to_row, live_items)}.values()
+            save_rows(list(rows))
+            total_saved += len(rows)
+        print(f"Page {page + 1}: kept {len(live_items)} of {len(items)} (Hits: {hits})")
+        time.sleep(1)  # 1 second pause so they dont think theyre getting ddosed
+    print(f"Done. Saved/updated {total_saved} listings, skipped {total_skipped} expired.")
 
 
 main()
