@@ -98,6 +98,7 @@ def is_expired(item):
 def to_row(item):
     return {
         "id": item["Id"],
+        "link": f"https://www.eis.gov.lv/EKEIS/Supplier/Procurement/{item['Id']}",
         "identification_number": item.get("ProcurementIdentificationNumber"),
         "title": item.get("ProcurementTitle"),
         "customer_name": item.get("CustomerTitle"),
